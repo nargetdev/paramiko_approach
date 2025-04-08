@@ -1,0 +1,16 @@
+{
+    "mqtt": {
+        "broker": "172.31.1.252",
+        "topic": "telemetry/poe_status"
+    },
+    "servers": [
+        {
+            "host": "172.31.1.254",
+            "user": "admin",
+            "password": "aReallyBadPassword5^",
+            "commands": [
+                "show poe status 0/1-0/12"
+            ]
+        }
+    ]
+} 
