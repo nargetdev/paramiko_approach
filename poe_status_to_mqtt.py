@@ -96,7 +96,7 @@ def publish_to_mqtt(broker, topic, message):
 
 def load_config():
     """Loads configuration from config.json file."""
-    config_path = Path(__file__).parent / "config.json"
+    config_path = Path(__file__).parent / "poe_control_config.json"
     try:
         with open(config_path) as f:
             return json.load(f)

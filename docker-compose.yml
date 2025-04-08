@@ -1,0 +1,51 @@
+version: '3'
+
+services:
+  poe_control:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - emqx
+    volumes:
+      # Mount configuration file for external updates
+      - ./poe_control_config.json:/app/poe_control_config.json
+    networks:
+      - poe_network
+
+  emqx:
+    image: emqx/emqx:4.4.14
+    restart: unless-stopped
+    ports:
+      # MQTT port
+      - "1883:1883"
+      # MQTT over WebSocket
+      - "8083:8083"
+      # EMQX Dashboard
+      - "18083:18083"
+    environment:
+      - EMQX_NAME=emqx
+      - EMQX_ALLOW_ANONYMOUS=true
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+    networks:
+      - poe_network
+
+  mqtt_test:
+    image: eclipse-mosquitto:2.0
+    command: tail -f /dev/null  # Keep container running
+    depends_on:
+      - emqx
+    networks:
+      - poe_network
+
+networks:
+  poe_network:
+    driver: bridge
+
+volumes:
+  emqx_data:
+  emqx_log:
+

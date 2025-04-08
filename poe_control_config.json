@@ -1,6 +1,6 @@
 {
     "mqtt": {
-        "broker": "localhost",
+        "broker": "emqx",
         "topic": "ubnt24/poe/+"
     },
     "servers": [

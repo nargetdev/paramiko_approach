@@ -4,15 +4,25 @@ import time
 import paramiko
 import paho.mqtt.client as mqtt
 from pathlib import Path
+import logging
+
+# Set up logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def load_config():
     """Loads configuration from poe_control_config.json file."""
     config_path = Path(__file__).parent / "poe_control_config.json"
     try:
         with open(config_path) as f:
-            return json.load(f)
+            config = json.load(f)
+            logger.debug(f"Loaded config: {config}")
+            return config
     except Exception as e:
-        print(f"Error loading config file: {e}")
+        logger.error(f"Error loading config file: {e}")
         exit(1)
 
 def send_poe_command(host, user, password, interface, command):
@@ -20,7 +30,7 @@ def send_poe_command(host, user, password, interface, command):
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     
-    print(f"Connecting to {host}...")
+    logger.info(f"Connecting to {host}...")
     ssh.connect(host, username=user, password=password, look_for_keys=False)
     
     # Get an interactive shell
@@ -49,11 +59,11 @@ def send_poe_command(host, user, password, interface, command):
     shell.recv(1000).decode()
     
     # Send the PoE command
-    print(f"Sending command: {command}")
+    logger.info(f"Sending command: {command}")
     shell.send(command + '\n')
     time.sleep(0.3)
     output = shell.recv(1000).decode()
-    print("Command output:", output)
+    logger.debug(f"Command output: {output}")
     
     # Exit configuration
     shell.send('exit\n')
@@ -66,9 +76,24 @@ def send_poe_command(host, user, password, interface, command):
 
 def on_connect(client, userdata, flags, rc):
     """Callback when connected to MQTT broker."""
-    print(f"Connected to MQTT broker with result code {rc}")
-    # Subscribe to all PoE control topics
-    client.subscribe("ubnt24/poe/+")
+    logger.debug(f"Connection callback - rc: {rc}, flags: {flags}")
+    if rc == 0:
+        logger.info("Connected to MQTT broker successfully")
+        logger.info("Subscribing to PoE control topics...")
+        # Subscribe to all PoE control topics
+        client.subscribe("ubnt24/poe/+")
+        logger.info("Successfully subscribed to 'ubnt24/poe/+'")
+        logger.info("Ready to receive PoE control commands")
+    else:
+        logger.error(f"Failed to connect to MQTT broker with result code {rc}")
+        # Reconnection will be handled by the loop_forever() method
+
+def on_disconnect(client, userdata, rc):
+    """Callback when disconnected from MQTT broker."""
+    logger.debug(f"Disconnect callback - rc: {rc}")
+    logger.warning(f"Disconnected from MQTT broker with result code {rc}")
+    if rc != 0:
+        logger.info("Unexpected disconnection. Will attempt to reconnect...")
 
 def on_message(client, userdata, msg):
     """Callback when message is received."""
@@ -80,7 +105,7 @@ def on_message(client, userdata, msg):
         port_match = topic.split('/')[-1]
         interface = f"0/{int(port_match):d}"
         
-        print(f"Received command {command} for interface {interface}")
+        logger.info(f"Received command {command} for interface {interface}")
         
         # Convert command to PoE operation mode
         if command.strip() == "0":
@@ -88,7 +113,7 @@ def on_message(client, userdata, msg):
         elif command.strip() == "1":
             poe_command = "poe opmode auto"
         else:
-            print(f"Invalid command received: {command}")
+            logger.error(f"Invalid command received: {command}")
             return
         
         # Send command to switch
@@ -102,22 +127,44 @@ def on_message(client, userdata, msg):
         )
         
     except Exception as e:
-        print(f"Error processing message: {e}")
+        logger.error(f"Error processing message: {e}")
 
 def main():
     # Load configuration
     config = load_config()
     
-    # Setup MQTT client
-    client = mqtt.Client(userdata=config)  # Pass config as userdata
+    # Setup MQTT client with latest API version
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, userdata=config)
     client.on_connect = on_connect
     client.on_message = on_message
+    client.on_disconnect = on_disconnect
     
-    # Connect to MQTT broker
-    print(f"Connecting to MQTT broker at {config['mqtt']['broker']}...")
-    client.connect(config["mqtt"]["broker"])
+    # Enable automatic reconnection
+    client.reconnect_delay_set(min_delay=1, max_delay=120)
     
-    # Loop forever
+    # Connect to MQTT broker with retry logic
+    max_retries = 5
+    retry_delay = 5  # seconds
+    
+    logger.info(f"Starting MQTT client with configuration: {config['mqtt']}")
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Attempting to connect to MQTT broker at {config['mqtt']['broker']} (attempt {attempt + 1}/{max_retries})...")
+            client.connect(config["mqtt"]["broker"])
+            logger.info("Connection attempt successful, starting network loop...")
+            break
+        except Exception as e:
+            logger.error(f"Connection attempt {attempt + 1} failed: {str(e)}")
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                logger.error("Max retries reached. Exiting...")
+                return
+    
+    # Loop forever with automatic reconnection
+    logger.info("Starting MQTT network loop...")
     client.loop_forever()
 
 if __name__ == "__main__":
